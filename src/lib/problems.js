@@ -22,6 +22,7 @@ function makeChoices(answer, min = 0, max = 99) {
   return shuffle([...choices])
 }
 
+// ── Original range-based generator (kept for 'all'/mixed/legacy use) ──
 export function generateEquation(op, maxNum) {
   let a, b, answer, text
 
@@ -39,7 +40,7 @@ export function generateEquation(op, maxNum) {
     b = [2, 5, 10][randInt(0, 2)]; answer = randInt(1, 10)
     a = b * answer; text = `${a} ÷ ${b}`
   } else {
-    // mixed +- 
+    // mixed +-
     const mixOp = Math.random() < 0.5 ? '+' : '-'
     if (mixOp === '+') {
       a = randInt(1, maxNum); b = randInt(1, maxNum - a > 0 ? maxNum - a : 1)
@@ -51,4 +52,34 @@ export function generateEquation(op, maxNum) {
   }
 
   return { text, answer, choices: makeChoices(answer, 0, maxNum * 2 + 10), type: 'equation' }
+}
+
+// ── Table-locked generator — used for per-table practice/speed nodes ──
+// `table` is the fixed operand (e.g. 7 for the ×7 table). The other
+// operand varies 1-10 (or 1-12 for + / -, to keep it interesting).
+export function generateTableEquation(op, table) {
+  let a, b, answer, text
+
+  if (op === '+') {
+    a = table; b = randInt(1, 12)
+    answer = a + b; text = `${a} + ${b}`
+  } else if (op === '-') {
+    // table = the number being subtracted (e.g. -7 table: always "_ − 7")
+    b = table; a = table + randInt(0, 10)
+    answer = a - b; text = `${a} − ${b}`
+  } else if (op === '*') {
+    a = table; b = randInt(1, 10)
+    answer = a * b; text = `${a} × ${b}`
+  } else if (op === '/') {
+    b = table; const quotient = randInt(1, 10)
+    a = b * quotient; answer = quotient; text = `${a} ÷ ${b}`
+  }
+
+  return { text, answer, choices: makeChoices(answer, 0, table * 12 + 10), type: 'equation' }
+}
+
+// ── Mixed generator across all tables seen in a world (for boss nodes) ──
+export function generateMixedEquation(op) {
+  const table = randInt(1, 10)
+  return generateTableEquation(op, table)
 }
