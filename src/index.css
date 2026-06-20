@@ -240,6 +240,14 @@ input  { font-family: var(--font); }
 .heart.empty { filter: grayscale(1); opacity: 0.25; }
 .heart.losing { animation: heart-break 0.4s ease; }
 
+.heart-pill {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 12px; background: var(--red-light);
+  border-radius: 99px; border: 2px solid var(--red);
+  font-size: 14px; font-weight: 800; color: var(--red-dark);
+}
+.heart-count { line-height: 1; }
+
 /* ── XP Pill ────────────────────────────────────── */
 .xp-pill {
   display: flex; align-items: center; gap: 5px;
