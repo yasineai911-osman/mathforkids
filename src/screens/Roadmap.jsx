@@ -67,19 +67,12 @@ export default function Roadmap({ kid, onStartNode }) {
     }
   }, [])
 
-  // Split the path into "completed/current" vs "locked" segments so we can
-  // color the traveled portion differently from what's still ahead —
-  // build one continuous path, then a second path only for the locked tail.
-  const fullPathD = buildSmoothPath(layout)
-
-  // Find the index of the first locked node, to know where the solid
-  // (traveled) path ends and the upcoming path begins.
+  // Only the traveled (completed + current) portion of the path is drawn —
+  // no line is rendered behind locked/upcoming nodes.
   const firstLockedIdx = layout.findIndex(({ node }) => getNodeStatus(node.id, progress) === 'locked')
   const travelEndIdx = firstLockedIdx === -1 ? layout.length - 1 : firstLockedIdx
   const traveledPoints = layout.slice(0, travelEndIdx + 1)
-  const lockedPoints   = layout.slice(Math.max(travelEndIdx, 0))
   const traveledPathD  = buildSmoothPath(traveledPoints)
-  const lockedPathD    = buildSmoothPath(lockedPoints)
 
   // Traveled path takes the color of whichever world the kid is currently in
   const traveledColor = layout[travelEndIdx]?.node.color || 'var(--green)'
@@ -89,11 +82,7 @@ export default function Roadmap({ kid, onStartNode }) {
       <div style={{ position: 'relative', minHeight: totalHeight, padding: '12px 0 60px' }}>
         {/* Smooth winding path */}
         <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} viewBox={`0 0 420 ${totalHeight}`} preserveAspectRatio="xMidYMin meet">
-          {/* Upcoming (locked) path — solid, light grey (no dashes, matches Duolingo) */}
-          {lockedPathD && (
-            <path d={lockedPathD} fill="none" stroke="#E5E5E5" strokeWidth="14" strokeLinecap="round" />
-          )}
-          {/* Traveled path — solid, current world's color */}
+          {/* Traveled path — solid, current world's color. No line is drawn behind locked/upcoming nodes. */}
           {traveledPathD && (
             <path d={traveledPathD} fill="none" stroke={traveledColor} strokeWidth="14" strokeLinecap="round" />
           )}
