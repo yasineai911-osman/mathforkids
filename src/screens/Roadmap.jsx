@@ -1,83 +1,106 @@
 import React, { useEffect, useRef } from 'react'
 import { ROADMAP, getNodeStatus } from '../lib/roadmap.js'
 
-// Winding path: nodes alternate left-center-right, repeating
-const POSITIONS = ['center', 'right', 'left']
-function getPos(i) { return POSITIONS[i % POSITIONS.length] }
-function getLeft(pos) {
-  if (pos === 'left')  return '18%'
-  if (pos === 'right') return '64%'
-  return '38%'
+const NODE_GAP   = 100   // vertical distance between consecutive nodes
+const BANNER_GAP = 110   // extra vertical space reserved for a world banner
+const AMPLITUDE  = 95    // how far left/right the path swings from center
+const CENTER_X   = 210   // center of the 420-wide viewBox
+const WAVE_NODES = 6     // how many nodes make up one full left-right-left cycle
+
+// Smooth sine-wave x position for a given node index — this is what makes
+// the path curve continuously instead of jumping between 3 fixed columns.
+function waveX(idx) {
+  const angle = (idx / WAVE_NODES) * Math.PI * 2
+  return CENTER_X + Math.sin(angle) * AMPLITUDE
 }
 
-const NODE_GAP   = 110
-const BANNER_GAP = 110 // extra vertical space reserved when a world banner appears
-
-// Precompute each node's vertical position, accounting for extra space
-// reserved above every node that starts a new world (for its banner).
+// Precompute every node's (x, y) position, reserving extra vertical space
+// above any node that starts a new world (for its banner).
 function computeLayout() {
-  let y = 60
+  let y = 70
   let lastWorld = -1
-  return ROADMAP.map((node) => {
+  return ROADMAP.map((node, idx) => {
     const showBanner = node.world !== lastWorld
     if (showBanner) {
       lastWorld = node.world
       y += BANNER_GAP
     }
     const top = y
+    const x   = waveX(idx)
     y += NODE_GAP
-    return { node, top, showBanner }
+    return { node, top, x, showBanner }
   })
+}
+
+// Build a single smooth SVG path string through every node's (x, y),
+// using a Catmull-Rom-to-bezier conversion so the curve flows naturally
+// through each point rather than connecting them with straight segments.
+function buildSmoothPath(points) {
+  if (points.length < 2) return ''
+  let d = `M ${points[0].x} ${points[0].top}`
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i - 1] || points[i]
+    const p1 = points[i]
+    const p2 = points[i + 1]
+    const p3 = points[i + 2] || p2
+    const cp1x = p1.x + (p2.x - p0.x) / 6
+    const cp1y = p1.top + (p2.top - p0.top) / 6
+    const cp2x = p2.x - (p3.x - p1.x) / 6
+    const cp2y = p2.top - (p3.top - p1.top) / 6
+    d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.top}`
+  }
+  return d
 }
 
 export default function Roadmap({ kid, onStartNode }) {
   const progress = { current_node_id: kid.current_node_id || 1 }
-  const currentIdx = ROADMAP.findIndex(n => n.id === progress.current_node_id || n.id === Number(progress.current_node_id))
   const currentNodeRef = useRef(null)
 
   const layout = computeLayout()
   const totalHeight = layout.length ? layout[layout.length - 1].top + 200 : 600
 
-  // Auto-scroll to the kid's current node on mount, so they don't have to
-  // manually scroll through everything they've already finished.
+  // Auto-scroll to the kid's current node on mount
   useEffect(() => {
     if (currentNodeRef.current) {
       currentNodeRef.current.scrollIntoView({ block: 'center', behavior: 'auto' })
     }
   }, [])
 
+  // Split the path into "completed/current" vs "locked" segments so we can
+  // color the traveled portion differently from what's still ahead —
+  // build one continuous path, then a second path only for the locked tail.
+  const fullPathD = buildSmoothPath(layout)
+
+  // Find the index of the first locked node, to know where the solid
+  // (traveled) path ends and the dashed (upcoming) path begins.
+  const firstLockedIdx = layout.findIndex(({ node }) => getNodeStatus(node.id, progress) === 'locked')
+  const travelEndIdx = firstLockedIdx === -1 ? layout.length - 1 : firstLockedIdx
+  const traveledPoints = layout.slice(0, travelEndIdx + 1)
+  const lockedPoints   = layout.slice(Math.max(travelEndIdx, 0))
+  const traveledPathD  = buildSmoothPath(traveledPoints)
+  const lockedPathD    = buildSmoothPath(lockedPoints)
+
   return (
     <div style={{ position: 'relative' }}>
       <div style={{ position: 'relative', minHeight: totalHeight, padding: '12px 0 60px' }}>
-        {/* SVG winding path line, spans the entire roadmap */}
+        {/* Smooth winding path */}
         <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} viewBox={`0 0 420 ${totalHeight}`} preserveAspectRatio="none">
-          {layout.map(({ top }, idx) => {
-            if (idx === 0) return null
-            const prevPos = getPos(idx - 1)
-            const currPos = getPos(idx)
-            const prevTop = layout[idx - 1].top
-            const y1 = prevTop + 34
-            const y2 = top + 34
-            const x1 = prevPos === 'left' ? 420 * 0.255 : prevPos === 'right' ? 420 * 0.705 : 420 * 0.48
-            const x2 = currPos === 'left' ? 420 * 0.255 : currPos === 'right' ? 420 * 0.705 : 420 * 0.48
-            const status = getNodeStatus(layout[idx].node.id, progress)
-            return (
-              <line key={idx} x1={x1} y1={y1} x2={x2} y2={y2}
-                stroke={status === 'locked' ? '#E5E5E5' : '#D7F5B1'}
-                strokeWidth="6" strokeLinecap="round"
-                strokeDasharray={status === 'locked' ? '10 8' : 'none'}
-              />
-            )
-          })}
+          {/* Upcoming (locked) path — dashed, grey */}
+          {lockedPathD && (
+            <path d={lockedPathD} fill="none" stroke="#E5E5E5" strokeWidth="14" strokeLinecap="round" strokeDasharray="2 22" />
+          )}
+          {/* Traveled path — solid, green */}
+          {traveledPathD && (
+            <path d={traveledPathD} fill="none" stroke="var(--green-light)" strokeWidth="14" strokeLinecap="round" />
+          )}
         </svg>
 
         {/* Nodes + section banners */}
-        {layout.map(({ node, top, showBanner }, idx) => {
-          const pos    = getPos(idx)
+        {layout.map(({ node, top, x, showBanner }) => {
           const status = getNodeStatus(node.id, progress)
-          const left   = getLeft(pos)
           const isCurrent = status === 'current'
           const isBoss = node.scope === 'world'
+          const leftPct = (x / 420) * 100
 
           return (
             <React.Fragment key={node.id}>
@@ -100,7 +123,7 @@ export default function Roadmap({ kid, onStartNode }) {
 
               <div
                 ref={isCurrent ? currentNodeRef : null}
-                style={{ position: 'absolute', top, left, transform: 'translateX(-50%)' }}
+                style={{ position: 'absolute', top, left: `${leftPct}%`, transform: 'translateX(-50%)' }}
               >
                 {isCurrent && (
                   <div style={{ position: 'absolute', bottom: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)', background: 'var(--ink)', color: 'white', fontSize: 11, fontWeight: 800, padding: '5px 12px', borderRadius: 99, letterSpacing: '0.08em', whiteSpace: 'nowrap', animation: 'bounce 2s ease infinite' }}>
