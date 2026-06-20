@@ -76,7 +76,7 @@ input  { font-family: var(--font); }
 }
 
 .screen-with-topbar {
-  padding-top: var(--topbar-height);
+  padding-top: calc(var(--topbar-height) + env(safe-area-inset-top));
 }
 
 /* ── Scrollbar ──────────────────────────────────── */
@@ -204,7 +204,10 @@ input  { font-family: var(--font); }
   width: 100%; max-width: 420px; height: var(--topbar-height);
   background: white; border-bottom: 2px solid #F0F0F0;
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 20px; z-index: 100;
+  padding: env(safe-area-inset-top) 20px 0;
+  padding-top: calc(env(safe-area-inset-top) + 0px);
+  box-sizing: content-box;
+  z-index: 100;
 }
 
 /* ── Bottom Nav ─────────────────────────────────── */
@@ -371,14 +374,4 @@ input  { font-family: var(--font); }
   align-items: center; justify-content: center; gap: 8px;
   transition: background 0.25s, border-radius 0.3s;
   position: relative; user-select: none;
-}
-/* ── Heart pill (replaces 5-emoji hearts row) ────── */
-.heart-pill {
-  display: flex; align-items: center; gap: 5px;
-  padding: 5px 12px; background: var(--red-light);
-  border-radius: 99px; border: 2px solid var(--red);
-  font-size: 14px; font-weight: 800; color: var(--red-dark);
-}
-.heart-count {
-  line-height: 1;
 }
