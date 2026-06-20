@@ -1,26 +1,32 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase.js'
-import { generateEquation } from '../lib/problems.js'
+import { generateTableEquation, generateMixedEquation } from '../lib/problems.js'
 import { MAX_HEARTS } from '../lib/xp.js'
 import Mascot from '../components/Mascot.jsx'
 
-const SESSION_LENGTH = 10
-const FEEDBACK_MS    = 900
+const SESSION_LENGTH  = 10
+const FEEDBACK_MS     = 900
+const SPEED_SECONDS    = 5   // per-question timer for speed nodes
 
-const OP_LABELS = { '+': 'Addition', '-': 'Subtraction', '*': 'Multiplication', '/': 'Division', '+-': 'Mixed', 'all': 'Challenge' }
-const LEVEL_COLORS = { equation: 'var(--blue)', situation: 'var(--purple)' }
+const OP_LABELS = { '+': 'Addition', '-': 'Subtraction', '*': 'Multiplication', '/': 'Division' }
 
 async function fetchSituationQuestion(node) {
   try {
     const { data, error } = await supabase.functions.invoke('generate-question', {
-      body: { op: node.op, maxNum: node.maxNum, level: node.id }
+      body: { op: node.op, maxNum: node.scope === 'world' ? null : node.table, level: node.id }
     })
     if (error || !data?.question) throw new Error('failed')
-    return data
+    return { text: data.question, answer: data.answer, choices: data.choices, type: 'situation' }
   } catch {
-    // Fallback to equation if AI fails
-    return { ...generateEquation(node.op, node.maxNum), type: 'equation' }
+    // Fallback to a plain table/mixed equation if the AI call fails
+    const eq = node.scope === 'world' ? generateMixedEquation(node.op) : generateTableEquation(node.op, node.table)
+    return { ...eq, type: 'equation' }
   }
+}
+
+function buildEquationQuestion(node) {
+  const eq = node.scope === 'world' ? generateMixedEquation(node.op) : generateTableEquation(node.op, node.table)
+  return { ...eq, type: 'equation' }
 }
 
 export default function Practice({ node, kid, onFinish, onBack }) {
@@ -32,18 +38,22 @@ export default function Practice({ node, kid, onFinish, onBack }) {
   const [selected,     setSelected]     = useState(null)
   const [locked,       setLocked]       = useState(false)
   const [loading,      setLoading]      = useState(true)
+  const [timeLeft,     setTimeLeft]     = useState(SPEED_SECONDS)
 
-  // Pre-generate all 10 questions
+  const isSpeed = node.mode === 'speed'
+  const isIRL   = node.mode === 'situation'
+
+  // Pre-generate all questions for this node based on its mode
   useEffect(() => {
     async function buildQuestions() {
       const qs = []
       for (let i = 0; i < SESSION_LENGTH; i++) {
-        // Every 3rd question is a real-life situation (if node supports it)
-        if (node.mode === 'situation' || (i % 3 === 2 && node.mode !== 'equation')) {
-          const q = await fetchSituationQuestion(node)
-          qs.push({ ...q, type: 'situation' })
+        if (isIRL) {
+          qs.push(await fetchSituationQuestion(node))
         } else {
-          qs.push({ ...generateEquation(node.op === 'all' ? ['+', '-', '*', '/'][Math.floor(Math.random() * 4)] : node.op, node.maxNum), type: 'equation' })
+          // table-practice and speed nodes both use plain equations,
+          // scoped to a single table or mixed across the world
+          qs.push(buildEquationQuestion(node))
         }
       }
       setQuestions(qs)
@@ -52,8 +62,25 @@ export default function Practice({ node, kid, onFinish, onBack }) {
     buildQuestions()
   }, [])
 
-  const current = questions[index]
+  const current  = questions[index]
   const progress = (index / SESSION_LENGTH) * 100
+
+  // Speed-mode countdown per question
+  useEffect(() => {
+    if (!isSpeed || loading || locked || !current) return
+    setTimeLeft(SPEED_SECONDS)
+    const tick = setInterval(() => {
+      setTimeLeft(t => {
+        if (t <= 1) {
+          clearInterval(tick)
+          handleAnswer(null) // time ran out — counts as wrong
+          return 0
+        }
+        return t - 1
+      })
+    }, 1000)
+    return () => clearInterval(tick)
+  }, [index, loading, isSpeed])
 
   const handleAnswer = useCallback(async (choice) => {
     if (locked || !current) return
@@ -106,23 +133,29 @@ export default function Practice({ node, kid, onFinish, onBack }) {
         <div className="practice-progress">
           <div className="practice-progress-fill" style={{ width: `${progress}%` }} />
         </div>
-        {/* Hearts */}
-        <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
-          {Array.from({ length: MAX_HEARTS }).map((_, i) => (
-            <span key={i} style={{ fontSize: 18, filter: i >= hearts ? 'grayscale(1)' : 'none', opacity: i >= hearts ? 0.25 : 1, transition: 'all 0.3s' }}>❤️</span>
-          ))}
+        {/* Single heart icon + count */}
+        <div className="heart-pill" style={{ flexShrink: 0 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--red)" aria-hidden="true">
+            <path d="M12 21s-7.5-4.6-10.2-9.1C.3 9.1 1.2 5.6 4.4 4.2c2.4-1 4.9-.2 6.6 1.7l1 1.1 1-1.1c1.7-1.9 4.2-2.7 6.6-1.7 3.2 1.4 4.1 4.9 2.6 7.7C19.5 16.4 12 21 12 21z" />
+          </svg>
+          <span className="heart-count">{hearts}</span>
         </div>
       </div>
 
       {/* Content */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 24px', gap: 0 }}>
-        {/* Difficulty badge */}
+        {/* Mode badge */}
         {current && (
-          <div style={{ marginBottom: 20, marginTop: 8 }}>
-            <span className="difficulty-badge" style={{ background: current.type === 'situation' ? 'var(--purple-light)' : 'var(--blue-light)', color: current.type === 'situation' ? 'var(--purple)' : 'var(--blue)' }}>
-              {current.type === 'situation' ? '🌍 Real life' : `🔢 ${OP_LABELS[node.op]}`}
-              &nbsp;· Level {typeof node.id === 'number' ? node.id : '?'}
+          <div style={{ marginBottom: 20, marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="difficulty-badge" style={{ background: isIRL ? 'var(--purple-light)' : isSpeed ? 'var(--yellow-light)' : 'var(--blue-light)', color: isIRL ? 'var(--purple)' : isSpeed ? '#7A5500' : 'var(--blue)' }}>
+              {isIRL ? '🌍 Real life' : isSpeed ? '⚡ Speed' : `🔢 ${OP_LABELS[node.op]}`}
+              &nbsp;· {node.scope === 'world' ? 'Mixed' : `Table ${node.table}`}
             </span>
+            {isSpeed && (
+              <span style={{ fontSize: 13, fontWeight: 800, color: timeLeft <= 2 ? 'var(--red)' : 'var(--ink-soft)' }}>
+                ⏱ {timeLeft}s
+              </span>
+            )}
           </div>
         )}
 
