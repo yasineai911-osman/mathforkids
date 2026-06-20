@@ -372,3 +372,13 @@ input  { font-family: var(--font); }
   transition: background 0.25s, border-radius 0.3s;
   position: relative; user-select: none;
 }
+/* ── Heart pill (replaces 5-emoji hearts row) ────── */
+.heart-pill {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 12px; background: var(--red-light);
+  border-radius: 99px; border: 2px solid var(--red);
+  font-size: 14px; font-weight: 800; color: var(--red-dark);
+}
+.heart-count {
+  line-height: 1;
+}
