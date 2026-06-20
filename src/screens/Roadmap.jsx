@@ -2,7 +2,8 @@ import React, { useEffect, useRef } from 'react'
 import { ROADMAP, getNodeStatus } from '../lib/roadmap.js'
 
 const NODE_GAP   = 90    // vertical distance between consecutive nodes
-const BANNER_GAP = 110   // extra vertical space reserved for a world banner
+const BANNER_GAP = 150   // extra vertical space reserved for a world banner
+const BANNER_HEIGHT = 78 // approx rendered height of a section banner card
 const AMPLITUDE  = 64    // how far left/right the path swings from center (Duolingo-style: gentle, not edge-to-edge)
 const CENTER_X   = 210   // center of the 420-wide viewBox
 const WAVE_NODES = 6     // how many nodes make up one full left-right-left cycle
@@ -28,7 +29,7 @@ function computeLayout() {
     const top = y
     const x   = waveX(idx)
     y += NODE_GAP
-    return { node, top, x, showBanner }
+    return { node, top, x, showBanner, waveIdx: idx }
   })
 }
 
@@ -112,11 +113,12 @@ export default function Roadmap({ kid, onStartNode }) {
                   className="section-banner"
                   style={{
                     position: 'absolute',
-                    top: top - BANNER_GAP + 20,
+                    top: top - BANNER_GAP + 24,
                     left: '50%',
                     transform: 'translateX(-50%)',
                     width: 'calc(100% - 40px)',
                     maxWidth: 380,
+                    height: BANNER_HEIGHT,
                   }}
                 >
                   <div className="section-label">{node.section}</div>
