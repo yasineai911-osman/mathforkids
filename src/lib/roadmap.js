@@ -10,10 +10,10 @@
 // Total: 4 × (10 × 3 + 2) = 128 nodes
 
 const WORLDS = [
-  { op: '+', name: 'Addition',       color: 'var(--green)',  icon: '➕' },
-  { op: '-', name: 'Subtraction',    color: 'var(--blue)',   icon: '➖' },
-  { op: '*', name: 'Multiplication', color: 'var(--orange)', icon: '✖️' },
-  { op: '/', name: 'Division',       color: 'var(--red)',    icon: '➗' },
+  { op: '+', name: 'Addition',       color: 'var(--green)',  light: 'var(--green-light)',  dark: 'var(--green-dark)',  icon: '➕' },
+  { op: '-', name: 'Subtraction',    color: 'var(--blue)',   light: 'var(--blue-light)',   dark: '#0E8FD0',            icon: '➖' },
+  { op: '*', name: 'Multiplication', color: 'var(--orange)', light: 'var(--orange-light)', dark: '#CC7700',            icon: '✖️' },
+  { op: '/', name: 'Division',       color: 'var(--red)',    light: 'var(--red-light)',    dark: 'var(--red-dark)',    icon: '➗' },
 ]
 
 const STAGE_META = {
@@ -48,6 +48,8 @@ function buildRoadmap() {
           sectionTitle,
           xpReward: meta.xpReward,
           color: world.color,
+          colorLight: world.light,
+          colorDark: world.dark,
           world: wIdx,
         })
       })
@@ -60,7 +62,7 @@ function buildRoadmap() {
       mode: 'situation', icon: '🌍',
       label: `${world.name} · Mixed real life`,
       section, sectionTitle: `Show what you know — all of ${world.name}`,
-      xpReward: 60, color: world.color, world: wIdx,
+      xpReward: 60, color: world.color, colorLight: world.light, colorDark: world.dark, world: wIdx,
     })
 
     order++
@@ -69,7 +71,7 @@ function buildRoadmap() {
       mode: 'speed', icon: '🏆',
       label: `${world.name} · Final speed run`,
       section, sectionTitle: `Show what you know — all of ${world.name}`,
-      xpReward: 80, color: world.color, world: wIdx,
+      xpReward: 80, color: world.color, colorLight: world.light, colorDark: world.dark, world: wIdx,
     })
   })
 
