@@ -1,92 +1,181 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase.js'
-import { generateProblem } from '../lib/problems.js'
-import ProgressBeads from '../components/ProgressBeads.jsx'
+import { generateEquation } from '../lib/problems.js'
+import { MAX_HEARTS } from '../lib/xp.js'
 import Mascot from '../components/Mascot.jsx'
 
 const SESSION_LENGTH = 10
-const FEEDBACK_DELAY = 800
+const FEEDBACK_MS    = 900
 
-const CHOICE_BASE = {
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-  width: '100%', padding: '20px 24px',
-  borderRadius: 'var(--radius-lg)',
-  fontSize: 28, fontWeight: 900, letterSpacing: '-0.02em',
-  border: '2.5px solid transparent', cursor: 'pointer',
-  transition: 'all 0.15s', boxShadow: '0 4px 0 rgba(0,0,0,0.10)',
-  fontFamily: 'var(--font)',
+const OP_LABELS = { '+': 'Addition', '-': 'Subtraction', '*': 'Multiplication', '/': 'Division', '+-': 'Mixed', 'all': 'Challenge' }
+const LEVEL_COLORS = { equation: 'var(--blue)', situation: 'var(--purple)' }
+
+async function fetchSituationQuestion(node) {
+  try {
+    const { data, error } = await supabase.functions.invoke('generate-question', {
+      body: { op: node.op, maxNum: node.maxNum, level: node.id }
+    })
+    if (error || !data?.question) throw new Error('failed')
+    return data
+  } catch {
+    // Fallback to equation if AI fails
+    return { ...generateEquation(node.op, node.maxNum), type: 'equation' }
+  }
 }
 
-function choiceStyle(choice, answer, selected, feedback) {
-  if (!feedback) return { ...CHOICE_BASE, background: 'var(--white)', color: 'var(--ink)' }
-  if (choice === answer) return { ...CHOICE_BASE, background: 'var(--green-light)', color: 'var(--green)', borderColor: 'var(--green)', boxShadow: '0 4px 0 rgba(76,175,130,0.25)' }
-  if (choice === selected && feedback === 'wrong') return { ...CHOICE_BASE, background: 'var(--red-light)', color: 'var(--red)', borderColor: 'var(--red)', boxShadow: '0 4px 0 rgba(255,107,107,0.2)' }
-  return { ...CHOICE_BASE, background: 'var(--white)', color: 'var(--ink-dim)', opacity: 0.45 }
-}
-
-export default function Practice({ kid, onFinish, onBack }) {
+export default function Practice({ node, kid, onFinish, onBack }) {
+  const [questions,    setQuestions]    = useState([])
   const [index,        setIndex]        = useState(0)
-  const [problem,      setProblem]      = useState(() => generateProblem(kid.grade))
   const [correctCount, setCorrectCount] = useState(0)
+  const [hearts,       setHearts]       = useState(kid.hearts)
   const [feedback,     setFeedback]     = useState(null)
   const [selected,     setSelected]     = useState(null)
   const [locked,       setLocked]       = useState(false)
+  const [loading,      setLoading]      = useState(true)
+
+  // Pre-generate all 10 questions
+  useEffect(() => {
+    async function buildQuestions() {
+      const qs = []
+      for (let i = 0; i < SESSION_LENGTH; i++) {
+        // Every 3rd question is a real-life situation (if node supports it)
+        if (node.mode === 'situation' || (i % 3 === 2 && node.mode !== 'equation')) {
+          const q = await fetchSituationQuestion(node)
+          qs.push({ ...q, type: 'situation' })
+        } else {
+          qs.push({ ...generateEquation(node.op === 'all' ? ['+', '-', '*', '/'][Math.floor(Math.random() * 4)] : node.op, node.maxNum), type: 'equation' })
+        }
+      }
+      setQuestions(qs)
+      setLoading(false)
+    }
+    buildQuestions()
+  }, [])
+
+  const current = questions[index]
+  const progress = (index / SESSION_LENGTH) * 100
 
   const handleAnswer = useCallback(async (choice) => {
-    if (locked) return
+    if (locked || !current) return
     setLocked(true)
     setSelected(choice)
-    const isCorrect = choice === problem.answer
-    setFeedback(isCorrect ? 'correct' : 'wrong')
-    if (isCorrect) setCorrectCount(c => c + 1)
+    const isCorrect = choice === current.answer
 
-    supabase.from('attempts').insert({
-      kid_id: kid.id, problem: problem.text,
-      correct_answer: problem.answer, kid_answer: choice, is_correct: isCorrect,
-    }).then(() => {})
+    if (!isCorrect) {
+      const newHearts = hearts - 1
+      setHearts(newHearts)
+      await supabase.from('kids').update({ hearts: newHearts }).eq('id', kid.id)
+      if (newHearts <= 0) {
+        setFeedback('wrong')
+        setTimeout(() => onFinish({ correctCount, totalHearts: 0, outOfHearts: true }), 1400)
+        return
+      }
+    } else {
+      setCorrectCount(c => c + 1)
+    }
+    setFeedback(isCorrect ? 'correct' : 'wrong')
+
+    supabase.from('attempts').insert({ kid_id: kid.id, problem: current.text, correct_answer: current.answer, kid_answer: choice, is_correct: isCorrect, node_id: node.id }).then(() => {})
 
     setTimeout(() => {
-      const nextIndex = index + 1
-      if (nextIndex >= SESSION_LENGTH) {
-        onFinish(correctCount + (isCorrect ? 1 : 0))
+      const next = index + 1
+      if (next >= SESSION_LENGTH) {
+        onFinish({ correctCount: correctCount + (isCorrect ? 1 : 0), totalHearts: isCorrect ? hearts : hearts - 1, outOfHearts: false })
       } else {
-        setIndex(nextIndex); setProblem(generateProblem(kid.grade))
-        setFeedback(null); setSelected(null); setLocked(false)
+        setIndex(next); setFeedback(null); setSelected(null); setLocked(false)
       }
-    }, FEEDBACK_DELAY)
-  }, [locked, problem, index, correctCount, kid, onFinish])
+    }, FEEDBACK_MS)
+  }, [locked, current, hearts, index, correctCount, kid, node, onFinish])
 
   const mascotMood = feedback === 'correct' ? 'correct' : feedback === 'wrong' ? 'wrong' : 'idle'
 
+  if (loading) {
+    return (
+      <div className="screen" style={{ justifyContent: 'center', alignItems: 'center' }}>
+        <div style={{ fontSize: 40, animation: 'spin 1s linear infinite' }}>⏳</div>
+        <p style={{ marginTop: 16, fontSize: 14, fontWeight: 700, color: 'var(--ink-soft)' }}>Getting your questions ready...</p>
+      </div>
+    )
+  }
+
   return (
-    <div className="screen" style={{ paddingTop: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 0 24px' }}>
-        <button onClick={onBack} className="btn-ghost" style={{ padding: '8px 12px', fontSize: 20 }}>←</button>
-        <ProgressBeads total={SESSION_LENGTH} filled={index} />
-        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-soft)', minWidth: 32, textAlign: 'right' }}>{index + 1}/{SESSION_LENGTH}</span>
+    <div className="screen" style={{ paddingBottom: feedback ? 160 : 0 }}>
+      {/* Top bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px 12px' }}>
+        <button onClick={onBack} style={{ fontSize: 18, color: 'var(--ink-soft)', padding: '4px 8px', border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'var(--font)' }}>✕</button>
+        <div className="practice-progress">
+          <div className="practice-progress-fill" style={{ width: `${progress}%` }} />
+        </div>
+        {/* Hearts */}
+        <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+          {Array.from({ length: MAX_HEARTS }).map((_, i) => (
+            <span key={i} style={{ fontSize: 18, filter: i >= hearts ? 'grayscale(1)' : 'none', opacity: i >= hearts ? 0.25 : 1, transition: 'all 0.3s' }}>❤️</span>
+          ))}
+        </div>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 28 }}>
-        <Mascot mood={mascotMood} color="var(--yellow)" size={130} />
-        <div key={problem.text} className="pop-in" style={{ fontSize: 64, fontWeight: 900, letterSpacing: '-0.04em', lineHeight: 1, textAlign: 'center' }}>
-          {problem.text}
+      {/* Content */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 24px', gap: 0 }}>
+        {/* Difficulty badge */}
+        {current && (
+          <div style={{ marginBottom: 20, marginTop: 8 }}>
+            <span className="difficulty-badge" style={{ background: current.type === 'situation' ? 'var(--purple-light)' : 'var(--blue-light)', color: current.type === 'situation' ? 'var(--purple)' : 'var(--blue)' }}>
+              {current.type === 'situation' ? '🌍 Real life' : `🔢 ${OP_LABELS[node.op]}`}
+              &nbsp;· Level {typeof node.id === 'number' ? node.id : '?'}
+            </span>
+          </div>
+        )}
+
+        {/* Mascot + question */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, marginBottom: 28, flex: 1, justifyContent: 'center' }}>
+          <Mascot mood={mascotMood} size={100} />
+          {current && (
+            <div key={index} className="pop-in" style={{ textAlign: 'center' }}>
+              {current.type === 'situation' ? (
+                <p style={{ fontSize: 20, fontWeight: 800, lineHeight: 1.4, color: 'var(--ink)', maxWidth: 320 }}>{current.text}</p>
+              ) : (
+                <p style={{ fontSize: 58, fontWeight: 900, letterSpacing: '-0.04em', lineHeight: 1 }}>{current.text}</p>
+              )}
+            </div>
+          )}
         </div>
-        {feedback === 'wrong' && (
-          <div className="pop-in" style={{ padding: '10px 20px', background: 'var(--red-light)', borderRadius: 99, fontSize: 14, fontWeight: 800, color: 'var(--red)' }}>
-            Almost! It's {problem.answer}
+
+        {/* Answer choices */}
+        {current && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 24 }}>
+            {current.choices.map((choice, i) => {
+              let cls = 'answer-btn'
+              if (feedback) {
+                if (choice === current.answer) cls += ' correct'
+                else if (choice === selected)  cls += ' wrong'
+                else                            cls += ' dimmed'
+              }
+              return (
+                <button key={i} className={cls} disabled={locked} onClick={() => handleAnswer(choice)}>
+                  {choice}
+                </button>
+              )
+            })}
           </div>
         )}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 32 }}>
-        {problem.choices.map(choice => (
-          <button key={choice} disabled={locked} onClick={() => handleAnswer(choice)}
-            style={choiceStyle(choice, problem.answer, selected, feedback)}
-            onMouseEnter={e => { if (!locked) e.currentTarget.style.transform = 'translateY(-2px)' }}
-            onMouseLeave={e => { e.currentTarget.style.transform = '' }}
-          >{choice}</button>
-        ))}
-      </div>
+      {/* Feedback footer */}
+      {feedback && (
+        <div className={`feedback-footer ${feedback}`}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 28 }}>{feedback === 'correct' ? '✅' : '❌'}</span>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: feedback === 'correct' ? 'var(--green-dark)' : 'var(--red-dark)' }}>
+                {feedback === 'correct' ? 'Correct! +10 XP' : `The answer is ${current?.answer}`}
+              </div>
+              {feedback === 'wrong' && hearts <= 1 && (
+                <div style={{ fontSize: 13, color: 'var(--red)', fontWeight: 700, marginTop: 2 }}>Last heart! Be careful ❤️</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
